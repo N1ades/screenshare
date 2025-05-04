@@ -51,20 +51,22 @@
             margin: 20px 0;
             font-weight: bold;
         }
-        #shareLink {
+        textarea {
             display: block;
             width: 100%;
+            height: 80px;
             padding: 10px;
             margin: 10px 0;
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 14px;
+            font-family: monospace;
         }
         #videoContainer {
             margin-top: 20px;
             text-align: center;
         }
-        #remoteVideo {
+        video {
             max-width: 100%;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
@@ -80,86 +82,98 @@
             border-radius: 4px;
             font-size: 14px;
         }
+        .view-section {
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Private Screen Sharing</h1>
         
-        <div id="sharerSection">
-            <div class="buttons">
-                <button id="shareButton">Share Screen</button>
-                <button id="stopButton" disabled>Stop Sharing</button>
-            </div>
-            
-            <div id="connectionInfo" class="hidden">
-                <p class="status">Share this link with the viewer:</p>
-                <input type="text" id="shareLink" readonly>
-                <button id="copyButton">Copy Link</button>
-            </div>
-            
-            <div class="status" id="sharerStatus"></div>
+        <div class="buttons">
+            <button id="shareScreenBtn">Share Screen</button>
+            <button id="stopSharingBtn" disabled>Stop Sharing</button>
         </div>
         
-        <div id="viewerSection" class="hidden">
-            <div id="videoContainer">
-                <video id="remoteVideo" autoplay playsinline></video>
+        <div id="shareSection" class="hidden">
+            <p class="status">Copy this code and share it with the viewer:</p>
+            <textarea id="offerBox" readonly></textarea>
+            <button id="copyOfferBtn">Copy Code</button>
+            <div class="status" id="shareStatus"></div>
+            
+            <div id="answerSection" class="hidden">
+                <p class="status">Paste the viewer's code here:</p>
+                <textarea id="answerBox"></textarea>
+                <button id="connectBtn">Connect</button>
             </div>
-            <div class="status" id="viewerStatus">Waiting for connection...</div>
+        </div>
+        
+        <div class="view-section">
+            <p class="status">To view someone's screen:</p>
+            <textarea id="remoteOfferBox" placeholder="Paste the sharing code here"></textarea>
+            <button id="viewScreenBtn">View Screen</button>
+            
+            <div id="viewAnswerSection" class="hidden">
+                <p class="status">Copy this code and send it back to the sharer:</p>
+                <textarea id="viewAnswerBox" readonly></textarea>
+                <button id="copyAnswerBtn">Copy Code</button>
+            </div>
+        </div>
+        
+        <div id="videoContainer" class="hidden">
+            <video id="remoteVideo" autoplay playsinline></video>
+            <div class="status" id="connectionStatus"></div>
         </div>
         
         <div class="info-section">
             <h3>How it works:</h3>
-            <p>This app uses direct peer-to-peer WebRTC connections with no media servers involved. The connection information is exchanged via URL parameters.</p>
+            <p>This app uses direct peer-to-peer WebRTC connections with no media servers. The connection requires a simple code exchange between both parties.</p>
             <p><strong>Privacy first:</strong> Your screen sharing traffic goes directly between peers, not through any server.</p>
         </div>
     </div>
 
     <script>
+        // DOM elements
+        const shareScreenBtn = document.getElementById('shareScreenBtn');
+        const stopSharingBtn = document.getElementById('stopSharingBtn');
+        const shareSection = document.getElementById('shareSection');
+        const offerBox = document.getElementById('offerBox');
+        const copyOfferBtn = document.getElementById('copyOfferBtn');
+        const shareStatus = document.getElementById('shareStatus');
+        const answerSection = document.getElementById('answerSection');
+        const answerBox = document.getElementById('answerBox');
+        const connectBtn = document.getElementById('connectBtn');
+        const remoteOfferBox = document.getElementById('remoteOfferBox');
+        const viewScreenBtn = document.getElementById('viewScreenBtn');
+        const viewAnswerSection = document.getElementById('viewAnswerSection');
+        const viewAnswerBox = document.getElementById('viewAnswerBox');
+        const copyAnswerBtn = document.getElementById('copyAnswerBtn');
+        const videoContainer = document.getElementById('videoContainer');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const connectionStatus = document.getElementById('connectionStatus');
+        
         // Global variables
         let peerConnection;
         let localStream;
         const configuration = {
             iceServers: [
-                { urls: "stun:stun.relay.metered.ca:80" },
                 { urls: "stun:stun.l.google.com:19302" }
             ]
         };
         
-        // DOM elements
-        const shareButton = document.getElementById('shareButton');
-        const stopButton = document.getElementById('stopButton');
-        const copyButton = document.getElementById('copyButton');
-        const shareLinkInput = document.getElementById('shareLink');
-        const sharerStatus = document.getElementById('sharerStatus');
-        const viewerStatus = document.getElementById('viewerStatus');
-        const connectionInfo = document.getElementById('connectionInfo');
-        const sharerSection = document.getElementById('sharerSection');
-        const viewerSection = document.getElementById('viewerSection');
-        const remoteVideo = document.getElementById('remoteVideo');
+        // Event listeners
+        shareScreenBtn.addEventListener('click', startSharing);
+        stopSharingBtn.addEventListener('click', stopSharing);
+        copyOfferBtn.addEventListener('click', copyText.bind(null, offerBox, copyOfferBtn));
+        connectBtn.addEventListener('click', connectWithAnswer);
+        viewScreenBtn.addEventListener('click', createAnswer);
+        copyAnswerBtn.addEventListener('click', copyText.bind(null, viewAnswerBox, copyAnswerBtn));
         
-        // Check if we're a viewer (from URL params)
-        const urlParams = new URLSearchParams(window.location.search);
-        const offer = urlParams.get('offer');
-        
-        if (offer) {
-            // We're the viewer
-            sharerSection.classList.add('hidden');
-            viewerSection.classList.remove('hidden');
-            
-            // Start as viewer
-            startAsViewer(offer);
-        } else {
-            // We're the potential sharer
-            shareButton.addEventListener('click', startSharing);
-            stopButton.addEventListener('click', stopSharing);
-            copyButton.addEventListener('click', copyShareLink);
-        }
-        
-        // Function to start as the screen sharer
+        // Function to start sharing screen
         async function startSharing() {
             try {
-                sharerStatus.textContent = 'Requesting screen access...';
+                shareStatus.textContent = 'Requesting screen access...';
                 
                 // Get screen with audio
                 localStream = await navigator.mediaDevices.getDisplayMedia({
@@ -167,7 +181,7 @@
                     audio: true
                 });
                 
-                sharerStatus.textContent = 'Screen access granted. Setting up connection...';
+                shareStatus.textContent = 'Setting up connection...';
                 
                 // Create peer connection
                 peerConnection = new RTCPeerConnection(configuration);
@@ -177,49 +191,36 @@
                     peerConnection.addTrack(track, localStream);
                 });
                 
-                // Create offer
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                
-                // Wait for ICE gathering to complete
-                await waitForIceGatheringComplete(peerConnection);
-                
-                sharerStatus.textContent = 'Connection ready! Waiting for viewer...';
-                
-                // Create share link with the offer
-                const offerString = btoa(JSON.stringify(peerConnection.localDescription));
-                const shareUrl = `${window.location.href}?offer=${offerString}`;
-                shareLinkInput.value = shareUrl;
-                connectionInfo.classList.remove('hidden');
-                
-                // Enable stop button
-                shareButton.disabled = true;
-                stopButton.disabled = false;
-                
-                // Setup event handlers for the connection
-                setupPeerConnectionHandlers(peerConnection);
-                
-                // Handle ICE candidate events
+                // Setup ICE handling
                 peerConnection.onicecandidate = event => {
-                    if (event.candidate) {
-                        // In a full app, we would send this to the signaling server
-                        console.log("New ICE candidate");
+                    if (event.candidate === null) {
+                        // ICE gathering complete
+                        const offer = JSON.stringify(peerConnection.localDescription);
+                        offerBox.value = btoa(offer); // Base64 encode the offer
+                        shareSection.classList.remove('hidden');
+                        answerSection.classList.remove('hidden');
+                        shareStatus.textContent = 'Ready! Share the code above and wait for viewer to connect.';
                     }
                 };
                 
                 // Handle connection state changes
-                peerConnection.onconnectionstatechange = event => {
-                    sharerStatus.textContent = `Connection: ${peerConnection.connectionState}`;
+                peerConnection.onconnectionstatechange = () => {
+                    shareStatus.textContent = `Connection: ${peerConnection.connectionState}`;
                     if (peerConnection.connectionState === 'connected') {
-                        sharerStatus.textContent = 'Connected to viewer!';
-                    } else if (peerConnection.connectionState === 'disconnected' || 
-                               peerConnection.connectionState === 'failed') {
-                        sharerStatus.textContent = 'Viewer disconnected';
+                        shareStatus.textContent = 'Connected! Sharing screen.';
                     }
                 };
                 
+                // Create offer
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                
+                // Update UI
+                shareScreenBtn.disabled = true;
+                stopSharingBtn.disabled = false;
+                
             } catch (error) {
-                sharerStatus.textContent = `Error: ${error.message}`;
+                shareStatus.textContent = `Error: ${error.message}`;
                 console.error(error);
                 stopSharing();
             }
@@ -237,112 +238,115 @@
                 peerConnection = null;
             }
             
-            sharerStatus.textContent = '';
-            connectionInfo.classList.add('hidden');
-            shareButton.disabled = false;
-            stopButton.disabled = true;
+            // Reset UI
+            shareScreenBtn.disabled = false;
+            stopSharingBtn.disabled = true;
+            shareSection.classList.add('hidden');
+            shareStatus.textContent = '';
         }
         
-        // Function to start as the viewer
-        async function startAsViewer(offerString) {
+        // Function to connect with answer
+        async function connectWithAnswer() {
             try {
-                viewerStatus.textContent = 'Connecting to shared screen...';
+                const answerStr = answerBox.value.trim();
+                if (!answerStr) {
+                    shareStatus.textContent = 'Please paste the viewer code first.';
+                    return;
+                }
                 
-                // Decode the offer from URL
-                const offerData = JSON.parse(atob(offerString));
+                if (!peerConnection) {
+                    shareStatus.textContent = 'Connection not initialized. Please restart sharing.';
+                    return;
+                }
+                
+                shareStatus.textContent = 'Connecting to viewer...';
+                
+                // Decode and parse the answer
+                const answerJSON = atob(answerStr);
+                const answer = JSON.parse(answerJSON);
+                
+                // Set remote description
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                shareStatus.textContent = 'Connection established!';
+                
+            } catch (error) {
+                shareStatus.textContent = `Error: ${error.message}`;
+                console.error(error);
+            }
+        }
+        
+        // Function to create answer (view screen)
+        async function createAnswer() {
+            try {
+                const offerStr = remoteOfferBox.value.trim();
+                if (!offerStr) {
+                    connectionStatus.textContent = 'Please paste the sharing code first.';
+                    videoContainer.classList.remove('hidden');
+                    return;
+                }
+                
+                connectionStatus.textContent = 'Connecting to shared screen...';
+                videoContainer.classList.remove('hidden');
+                
+                // Decode and parse the offer
+                const offerJSON = atob(offerStr);
+                const offer = JSON.parse(offerJSON);
                 
                 // Create peer connection
                 peerConnection = new RTCPeerConnection(configuration);
                 
-                // Setup event handlers for the connection
-                setupPeerConnectionHandlers(peerConnection);
+                // Setup event handlers
+                peerConnection.ontrack = event => {
+                    console.log("Received remote track");
+                    if (event.streams && event.streams[0]) {
+                        remoteVideo.srcObject = event.streams[0];
+                        connectionStatus.textContent = 'Connected! Receiving screen share.';
+                    }
+                };
+                
+                peerConnection.onicecandidate = event => {
+                    if (event.candidate === null) {
+                        // ICE gathering complete
+                        const answer = JSON.stringify(peerConnection.localDescription);
+                        viewAnswerBox.value = btoa(answer); // Base64 encode the answer
+                        viewAnswerSection.classList.remove('hidden');
+                    }
+                };
+                
+                peerConnection.onconnectionstatechange = () => {
+                    connectionStatus.textContent = `Connection: ${peerConnection.connectionState}`;
+                    if (peerConnection.connectionState === 'connected') {
+                        connectionStatus.textContent = 'Connected! Receiving screen share.';
+                    } else if (peerConnection.connectionState === 'disconnected' || 
+                               peerConnection.connectionState === 'failed') {
+                        connectionStatus.textContent = 'Disconnected from sharer.';
+                    }
+                };
                 
                 // Set remote description from offer
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(offerData));
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
                 
                 // Create answer
                 const answer = await peerConnection.createAnswer();
                 await peerConnection.setLocalDescription(answer);
                 
-                // In a full signaling solution, we would send this answer to the sharer
-                console.log("Created answer");
-                
-                viewerStatus.textContent = 'Connecting...';
+                connectionStatus.textContent = 'Connecting... Send the code back to the sharer.';
                 
             } catch (error) {
-                viewerStatus.textContent = `Error: ${error.message}`;
+                connectionStatus.textContent = `Error: ${error.message}`;
                 console.error(error);
             }
         }
         
-        // Function to setup common peer connection handlers
-        function setupPeerConnectionHandlers(pc) {
-            // Handle incoming streams
-            pc.ontrack = event => {
-                console.log("Received remote track");
-                if (event.streams && event.streams[0]) {
-                    remoteVideo.srcObject = event.streams[0];
-                    
-                    if (viewerSection.classList.contains('hidden')) {
-                        // We're the sharer, but we can see our own stream for testing
-                    } else {
-                        // We're the viewer
-                        viewerStatus.textContent = 'Connected! Receiving screen share.';
-                    }
-                }
-            };
-            
-            // Handle connection state changes
-            pc.onconnectionstatechange = event => {
-                console.log(`Connection state: ${pc.connectionState}`);
-                if (pc.connectionState === 'connected') {
-                    if (!viewerSection.classList.contains('hidden')) {
-                        viewerStatus.textContent = 'Connected!';
-                    }
-                } else if (pc.connectionState === 'disconnected' ||
-                           pc.connectionState === 'failed') {
-                    if (!viewerSection.classList.contains('hidden')) {
-                        viewerStatus.textContent = 'Disconnected from sharer';
-                    }
-                }
-            };
-        }
-        
-        // Function to copy share link
-        function copyShareLink() {
-            shareLinkInput.select();
+        // Function to copy text
+        function copyText(element, button) {
+            element.select();
             document.execCommand('copy');
-            copyButton.textContent = 'Copied!';
+            const originalText = button.textContent;
+            button.textContent = 'Copied!';
             setTimeout(() => {
-                copyButton.textContent = 'Copy Link';
+                button.textContent = originalText;
             }, 2000);
-        }
-        
-        // Helper function to wait for ICE gathering to complete
-        function waitForIceGatheringComplete(pc) {
-            return new Promise(resolve => {
-                if (pc.iceGatheringState === 'complete') {
-                    resolve();
-                    return;
-                }
-                
-                const checkState = () => {
-                    if (pc.iceGatheringState === 'complete') {
-                        pc.removeEventListener('icegatheringstatechange', checkState);
-                        resolve();
-                    }
-                };
-                
-                pc.addEventListener('icegatheringstatechange', checkState);
-                
-                // Timeout after 5 seconds
-                setTimeout(() => {
-                    if (pc.iceGatheringState !== 'complete') {
-                        pc.removeEventListener('icegatheringstatechange', checkState);
-                        resolve();
-                    }
-                }, 5000);
-            });
         }
     </script>
 </body>
