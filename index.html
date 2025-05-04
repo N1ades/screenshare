@@ -1,0 +1,82 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+// Store streams (in production use a proper database)
+const streams = new Map();
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+
+// Serve HTML
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// API to create a new stream
+app.post('/stream', (req, res) => {
+    const streamId = generateId();
+    streams.set(streamId, { connections: [] });
+    res.json({ streamId });
+});
+
+// API to get stream info
+app.get('/stream/:id', (req, res) => {
+    const streamId = req.params.id;
+    if (streams.has(streamId)) {
+        res.json({ exists: true });
+    } else {
+        res.status(404).json({ exists: false });
+    }
+});
+
+// Socket.io for real-time communication
+io.on('connection', (socket) => {
+    socket.on('join-stream', (streamId) => {
+        if (streams.has(streamId)) {
+            socket.join(streamId);
+            streams.get(streamId).connections.push(socket.id);
+            socket.emit('stream-joined');
+        } else {
+            socket.emit('stream-not-found');
+        }
+    });
+
+    socket.on('offer', (data) => {
+        socket.to(data.streamId).emit('offer', data.offer);
+    });
+
+    socket.on('answer', (data) => {
+        socket.to(data.streamId).emit('answer', data.answer);
+    });
+
+    socket.on('ice-candidate', (data) => {
+        socket.to(data.streamId).emit('ice-candidate', data.candidate);
+    });
+
+    socket.on('disconnect', () => {
+        streams.forEach((stream, streamId) => {
+            const index = stream.connections.indexOf(socket.id);
+            if (index !== -1) {
+                stream.connections.splice(index, 1);
+                if (stream.connections.length === 0) {
+                    streams.delete(streamId);
+                }
+            }
+        });
+    });
+});
+
+function generateId() {
+    return Math.random().toString(36).substring(2, 10);
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+});
